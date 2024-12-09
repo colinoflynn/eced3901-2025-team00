@@ -143,20 +143,5 @@ class SquareRoutine : public rclcpp::Node
     	
 
 
-//------------------------------------------------------------------------------------
-// Main code execution
-int main(int argc, char * argv[])
-{
-	// Initialize ROS2
-	rclcpp::init(argc, argv);
-  
-	// Start node and callbacks
-	rclcpp::spin(std::make_shared<SquareRoutine>());
- 
-	// Stop node 
-	rclcpp::shutdown();
-	return 0;
-}
-
 
 
