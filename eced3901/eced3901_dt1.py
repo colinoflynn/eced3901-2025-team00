@@ -161,7 +161,7 @@ class NavigateSquare(Node):
 
         # WARNING: Check for updates, note this is set and will run backwards
         #          on the physical model but correctly in simulation.
-        self.x_vel = -0.2
+        self.x_vel = 0.2
 
         self.x_now = 0.0
         self.x_init = 0.0
@@ -201,44 +201,61 @@ class NavigateSquare(Node):
 
         self.timer = self.create_timer(0.1, self.timer_callback)
 
-    def timer_callback(self):
-        """Timer callback for 10Hz control loop"""
-
-        #self.get_logger().info(f'Timer hit')
+    def control_example_odom(self):
+        """ Control example using odomentry """
 
         msg = Twist()
         # This has two fields:
         # msg.linear.x
         # msg.angular.z
-        	
+		        	
 		# Calculate distance travelled from initial
         self.d_now = pow( pow(self.x_now - self.x_init, 2) + pow(self.y_now - self.y_init, 2), 0.5 )
-		
-	    # Keep moving if not reached last distance target
+
         if self.d_now < self.d_aim:
-            msg.linear.x = -self.x_vel
+            msg.linear.x = self.x_vel
             msg.angular.z = 0.0            
         else:
             msg.linear.x = 0.0 # //double(rand())/double(RAND_MAX); //fun
             msg.angular.z = 0.0 # //2*double(rand())/double(RAND_MAX) - 1; //fun
+
+        self.pub_vel.publish(msg)
+        self.get_logger().info("Sent: " + str(msg))    
+
+    def control_example_lidar(self):
+        """ Control example using LIDAR"""
+        msg = Twist()
+        # This has two fields:
+        # msg.linear.x
+        # msg.angular.z		        	
 
         laser_ranges = self.ldi.get_range_array(0.0)
         if laser_ranges is None:
             self.get_logger().warning("Invalid range data, skipping, see if solves itself...")
             return
 
+        # This gets the minimum range, but ignores NONE values. The LIDAR data isn't always
+        # reliable, so we might want to ignore NONEs. We also might want to select the minimum
+        # range from our entire sweep.
         laser_ranges_min = min_ignore_None(laser_ranges)
 
+        # If ALL the lidar returns are NONE, it means all returns were invalid (probably too close).
+        # So only do something if the 
         if laser_ranges_min and laser_ranges_min > 0.5:
-            msg.linear.x = -self.x_vel
+            msg.linear.x = self.x_vel
         elif laser_ranges_min and laser_ranges_min < 0.5:
             msg.angular.z = 1.0
 
         self.pub_vel.publish(msg)
-        self.get_logger().info("Sent: " + str(msg))
-        #self.get_logger().info("ADC: " + str(self.sensor.read_adc()))
+        self.get_logger().info("Sent: " + str(msg))      
 
-        self.ldi.get_range_array(0)
+    def timer_callback(self):
+        """Timer callback for 10Hz control loop"""
+
+        #self.get_logger().info(f'Timer hit')
+
+        self.control_example_odom()
+        #self.control_example_lidar()  
 
     def odom_callback(self, msg):
         """Callback on 'odom' subscription"""

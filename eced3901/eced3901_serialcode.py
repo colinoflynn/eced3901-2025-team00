@@ -22,8 +22,6 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Twist
 
-from sensor_msgs.msg import LaserScan
-
 from collections import deque
 
 import serial
@@ -56,112 +54,6 @@ class SerialSensor(object):
         value = int(data)
         return value
 
-class LaserDataInterface(object):
-
-    def __init__(self, storage_depth=4, logger=None):
-        self.laser_data = deque()
-        self.depth = storage_depth
-        self.logger = logger
-
-    def get_logger(self):
-        if self.logger:
-            return self.logger
-
-    def get_range_array(self, center_deg, left_offset_deg=-5, right_offset_deg=+5, invalid_data=None):
-        """
-        This function gets an array of lidar data. Set center_deg (0 = front), the array starts at left_offset_deg
-        and ends at right_offset_deg. You can choose to select specific points within the offset for exampl.
-        """
-
-        if center_deg < -180 or center_deg > 180:
-            raise ValueError("Invalid range: %d"%center_deg)
-
-        if left_offset_deg < -180 or left_offset_deg > 0:
-            raise ValueError("Invalid left offset: %d"%left_offset_deg)
-
-        if right_offset_deg > 180 or right_offset_deg < 0:
-            raise ValueError("Invalid right offset: %d"%right_offset_deg)
-
-        # No data yet
-        if len(self.laser_data) == 0:
-            return None
-
-        angleset_deg = (self.anglestep * 180.0) / 3.14159
-        offset_i = round(center_deg / angleset_deg)
-        offset_pos = round(right_offset_deg / angleset_deg)
-        offset_neg = round(left_offset_deg / angleset_deg)
-
-        #Get absolute values, which may be negative!
-        start = offset_i + offset_neg
-        end = offset_i + offset_pos
-        
-        # Remap to -180 to 0 range
-        if start > 180:
-            start = start - 360
-
-        if end > 180:
-            end = end - 360
-
-        # Remap to 180 to 0 range
-        if start < -180:
-            start = start + 360
-        
-        if end < -180:
-            end = end + 360
-
-        tempdata = self.laser_data[0]
-        data = list(map(lambda x: None if x < self.minrange or x > self.maxrange else x, tempdata))
-        
-        #self.get_logger().info('Scan Data: "%s"' % str(data))
-                
-        # Index 0 maps to 0, Index len/2 maps to 180, Index len maps to -180
-        # Remap this so we have array as expected from -180 to 180
-        zero_offset = int(len(data) / 2)
-        new_slice = data[zero_offset:] + data[:(zero_offset-1)]
-
-        self.get_logger().info('Scan Data: "%d"' % len(new_slice))
-        
-        # Normal - we just take a slice
-        start_index = round(start / angleset_deg)
-        end_index = round(end / angleset_deg)
-
-        start_index += zero_offset
-        end_index += zero_offset
-
-        if end_index > len(data):
-            end_index = len(data)-1
-            raise ValueError("Oops?!")
-        
-        if start_index < 0:
-            start_index = 0
-            raise ValueError("Oops?!")
-
-        if end > start:
-            lidar_data = new_slice[start_index:end_index]
-            lidar_data = lidar_data[::-1]
-            #self.get_logger().info('Scan Data: "%d:%d"' % (start_index, end_index))
-            self.get_logger().info('Scan Data: "%s"' % str(lidar_data))
-            return lidar_data
-        else:
-            raise NotImplementedError("Function cannot deal with splitting array (typically 180 / -180)")
-
-
-    def process_laser_msg(self, msg):
-        self.anglestep = msg.angle_increment
-        self.minrange = msg.range_min
-        self.maxrange = msg.range_max
-        ranges = msg.ranges[0:]
-
-        # Index 0 is front of robot & counts clockwise from there
-        num_points = len(ranges)
-
-        self.laser_data.append(msg.ranges)
-
-        # Get rid of old data
-        if len(self.laser_data) > self.depth:
-            self.laser_data.popleft()
-
-
 def noneIsInfinite(value):
     if value is None:
         return float("inf")
@@ -188,7 +80,7 @@ class NavigateSquare(Node):
 
         # WARNING: Check for updates, note this is set and will run backwards
         #          on the physical model but correctly in simulation.
-        self.x_vel = -0.2
+        self.x_vel = 0.2
         self.x_now = 0.0
         self.x_init = 0.0
         self.y_now = 0.0
@@ -211,55 +103,35 @@ class NavigateSquare(Node):
             'cmd_vel',
             10) #Queue size 10
 
-        # Subscribe to lidar - this requires a policy, otherwise you won't see any data
-        qos_policy = rclpy.qos.QoSProfile(reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
-                                          history=rclpy.qos.HistoryPolicy.KEEP_LAST,
-                                          depth=1)
-
-        self.sub_lidar = self.create_subscription(
-            LaserScan,
-            'scan',
-            self.range_callback,
-            qos_policy
-        )
-
-        self.ldi = LaserDataInterface(logger=self.get_logger())
-
         self.timer = self.create_timer(0.1, self.timer_callback)
         self.sensor = SerialSensor()
+
+    def control_example_odom(self):
+        """ Control example using odomentry """
+
+        msg = Twist()
+        # This has two fields:
+        # msg.linear.x
+        # msg.angular.z
+		        	
+		# Calculate distance travelled from initial
+        self.d_now = pow( pow(self.x_now - self.x_init, 2) + pow(self.y_now - self.y_init, 2), 0.5 )
+
+        if self.d_now < self.d_aim:
+            msg.linear.x = self.x_vel
+            msg.angular.z = 0.0            
+        else:
+            msg.linear.x = 0.0 # //double(rand())/double(RAND_MAX); //fun
+            msg.angular.z = 0.0 # //2*double(rand())/double(RAND_MAX) - 1; //fun
+
+        return msg
 
     def timer_callback(self):
         """Timer callback for 10Hz control loop"""
 
         #self.get_logger().info(f'Timer hit')
 
-        msg = Twist()
-        # This has two fields:
-        # msg.linear.x
-        # msg.angular.z
-        	
-		# Calculate distance travelled from initial
-        self.d_now = pow( pow(self.x_now - self.x_init, 2) + pow(self.y_now - self.y_init, 2), 0.5 )
-		
-	    # Keep moving if not reached last distance target
-        if self.d_now < self.d_aim:
-            msg.linear.x = -self.x_vel
-            msg.angular.z = 0.0            
-        else:
-            msg.linear.x = 0.0 # //double(rand())/double(RAND_MAX); //fun
-            msg.angular.z = 0.0 # //2*double(rand())/double(RAND_MAX) - 1; //fun
-
-        laser_ranges = self.ldi.get_range_array(0.0)
-        if laser_ranges is None:
-            self.get_logger().warning("Invalid range data, skipping, see if solves itself...")
-            return
-
-        laser_ranges_min = min_ignore_None(laser_ranges)
-
-        if laser_ranges_min and laser_ranges_min > 0.5:
-            msg.linear.x = -self.x_vel
-        elif laser_ranges_min and laser_ranges_min < 0.5:
-            msg.angular.z = 1.0
+        msg = self.control_example_odom()
 
         if msg.linear.x == 0:
             self.sensor.led_off()
@@ -269,8 +141,6 @@ class NavigateSquare(Node):
         self.pub_vel.publish(msg)
         self.get_logger().info("Sent: " + str(msg))
         self.get_logger().info("ADC: " + str(self.sensor.read_adc()))
-
-        self.ldi.get_range_array(0)
 
     def odom_callback(self, msg):
         """Callback on 'odom' subscription"""
