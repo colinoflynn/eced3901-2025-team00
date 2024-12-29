@@ -32,7 +32,8 @@ setup(
     entry_points={
         'console_scripts': [
             'talker = eced3901.publisher_member_function:main',
-            'dt1 = eced3901.eced3901_dt1:main'
+            'dt1 = eced3901.eced3901_dt1:main',
+            'serialsensor = eced3901.eced3901_serialcode:main',
         ],
     },
 )

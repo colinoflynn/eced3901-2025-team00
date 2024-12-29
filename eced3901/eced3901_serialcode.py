@@ -26,6 +26,36 @@ from sensor_msgs.msg import LaserScan
 
 from collections import deque
 
+import serial
+
+
+class SerialSensor(object):
+    def __init__(self):
+        self.ser = serial.Serial(port='/dev/ttySensor1',
+            baudrate=115200,
+            rtscts=True,
+            timeout=0.01,
+            inter_byte_timeout=0.01)
+        
+    def led_on(self):
+        self.ser.write(b"l")
+    
+    def led_off(self):
+        self.ser.write(b"L")
+    
+    def read_adc(self):
+        self.ser.write(b"S")
+        data = self.ser.read(100)
+        s = data.decode("ascii")
+
+        # WARNING: This exception will kill your system! Should handle it instead and just try again later,
+        #          or change this to a logging message
+        if s[0:3] != "ADC":
+            raise IOError("Serial Sync problem! Expected 'ADC', got: %s"%s)
+        data = s[4:]
+        value = int(data)
+        return value
+
 class LaserDataInterface(object):
 
     def __init__(self, storage_depth=4, logger=None):
@@ -39,10 +69,8 @@ class LaserDataInterface(object):
 
     def get_range_array(self, center_deg, left_offset_deg=-5, right_offset_deg=+5, invalid_data=None):
         """
-        This function should return an array of lidar data. Set center_deg (0 = front), the array starts at left_offset_deg
-        and ends at right_offset_deg. You can choose to select specific points within the offset for example.
-
-        WARNING: THIS FUNCTION IS NOT TESTED AND MAY NOT WORK AS INTENDED. NOT SUGGESTED TO USE AS-IS.
+        This function gets an array of lidar data. Set center_deg (0 = front), the array starts at left_offset_deg
+        and ends at right_offset_deg. You can choose to select specific points within the offset for exampl.
         """
 
         if center_deg < -180 or center_deg > 180:
@@ -91,7 +119,6 @@ class LaserDataInterface(object):
         zero_offset = int(len(data) / 2)
         new_slice = data[zero_offset:] + data[:(zero_offset-1)]
 
-        # Uncomment this to see scan data in console (chatty)
         self.get_logger().info('Scan Data: "%d"' % len(new_slice))
         
         # Normal - we just take a slice
@@ -162,7 +189,6 @@ class NavigateSquare(Node):
         # WARNING: Check for updates, note this is set and will run backwards
         #          on the physical model but correctly in simulation.
         self.x_vel = -0.2
-
         self.x_now = 0.0
         self.x_init = 0.0
         self.y_now = 0.0
@@ -200,6 +226,7 @@ class NavigateSquare(Node):
         self.ldi = LaserDataInterface(logger=self.get_logger())
 
         self.timer = self.create_timer(0.1, self.timer_callback)
+        self.sensor = SerialSensor()
 
     def timer_callback(self):
         """Timer callback for 10Hz control loop"""
@@ -234,9 +261,14 @@ class NavigateSquare(Node):
         elif laser_ranges_min and laser_ranges_min < 0.5:
             msg.angular.z = 1.0
 
+        if msg.linear.x == 0:
+            self.sensor.led_off()
+        else:
+            self.sensor.led_on()
+
         self.pub_vel.publish(msg)
         self.get_logger().info("Sent: " + str(msg))
-        #self.get_logger().info("ADC: " + str(self.sensor.read_adc()))
+        self.get_logger().info("ADC: " + str(self.sensor.read_adc()))
 
         self.ldi.get_range_array(0)
 
